@@ -1,71 +1,70 @@
-import { DocumentClient } from "aws-sdk/clients/dynamodb";
+import { DynamoDBClient, DocumentClient } from "@aws-sdk/client-dynamodb";
 
-interface QueueItem {
-  id: string;
-  priority: number;
-  payload: string;
+const tableName = "my-priority-queue";
+
+const dynamoDBClient = new DynamoDBClient({ region: "us-east-1" });
+const documentClient = new DocumentClient({ service: dynamoDBClient });
+
+async function enqueueItem(item: any, priority: number) {
+  const params = {
+    TableName: tableName,
+    Item: { item, priority },
+  };
+
+  await documentClient.put(params).promise();
 }
 
-class PriorityQueue {
-  private tableName: string;
-  private dbClient: DocumentClient;
+async function dequeueItem() {
+  const params = {
+    TableName: tableName,
+    KeyConditionExpression: "#pk = :pk",
+    ExpressionAttributeNames: {
+      "#pk": "priority",
+    },
+    ExpressionAttributeValues: {
+      ":pk": { N: "1" },
+    },
+    Limit: 1,
+    ScanIndexForward: false,
+  };
 
-  constructor(tableName: string) {
-    this.tableName = tableName;
-    this.dbClient = new DocumentClient();
+  const result = await documentClient.query(params).promise();
+
+  if (result.Items && result.Items.length > 0) {
+    const item = result.Items[0].item;
+    const deleteParams = {
+      TableName: tableName,
+      Key: {
+        item,
+        priority: result.Items[0].priority,
+      },
+    };
+    await documentClient.delete(deleteParams).promise();
+    return item;
   }
 
-  async enqueue(item: QueueItem) {
-    await this.dbClient.put({
-      TableName: this.tableName,
-      Item: item,
-    }).promise();
+  return null;
+}
+
+async function peekTopItem() {
+  const params = {
+    TableName: tableName,
+    KeyConditionExpression: "#pk = :pk",
+    ExpressionAttributeNames: {
+      "#pk": "priority",
+    },
+    ExpressionAttributeValues: {
+      ":pk": { N: "1" },
+    },
+    Limit: 1,
+    ScanIndexForward: false,
+  };
+
+  const result = await documentClient.query(params).promise();
+
+  if (result.Items && result.Items.length > 0) {
+    return result.Items[0].item;
   }
 
-  async dequeue(): Promise<QueueItem | undefined> {
-    const result = await this.dbClient.query({
-      TableName: this.tableName,
-      KeyConditionExpression: "#pk = :pk",
-      ExpressionAttributeNames: {
-        "#pk": "priority",
-      },
-      ExpressionAttributeValues: {
-        ":pk": 1,
-      },
-      Limit: 1,
-      ScanIndexForward: false,
-    }).promise();
-
-    if (result.Items && result.Items.length > 0) {
-      const item = result.Items[0] as QueueItem;
-      await this.dbClient.delete({
-        TableName: this.tableName,
-        Key: {
-          id: item.id,
-        },
-      }).promise();
-      return item;
-    }
-    return undefined;
-  }
-
-  async peek(): Promise<QueueItem | undefined> {
-    const result = await this.dbClient.query({
-      TableName: this.tableName,
-      KeyConditionExpression: "#pk = :pk",
-      ExpressionAttributeNames: {
-        "#pk": "priority",
-      },
-      ExpressionAttributeValues: {
-        ":pk": 1,
-      },
-      Limit: 1,
-      ScanIndexForward: false,
-    }).promise();
-
-    if (result.Items && result.Items.length > 0) {
-      return result.Items[0] as QueueItem;
-    }
-    return undefined;
-  }
+  return null;
 }
